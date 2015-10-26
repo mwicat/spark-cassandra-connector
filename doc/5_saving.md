@@ -37,6 +37,26 @@ collection.saveToCassandra("test", "words", SomeColumns("word", "count"))
 
     (4 rows)
    
+Using a custom mapper is also supported with tuples
+
+```sql
+CREATE TABLE test.words (word text PRIMARY KEY, count int);
+```
+
+```scala
+val collection = sc.parallelize(Seq((30, "cat"), (40, "fox")))
+collection.saveToCassandra("test", "words", SomeColumns("word" as "_2", "count" as "_1"))
+```
+    
+    cqlsh:test> select * from words;
+
+     word | count
+    ------+-------
+      cat |    30
+      fox |    40
+
+    (2 rows)
+
 ## Saving a collection of objects
 When saving a collection of objects of a user-defined class, the items to be saved
 must provide appropriately named public property accessors for getting every column
@@ -77,6 +97,70 @@ val collection = sc.parallelize(Seq(WordCount("dog", 50), WordCount("cow", 60)))
 collection.saveToCassandra("test", "words2", SomeColumns("word", "num" as "count"))
 ```
 
+## Modifying CQL Collections
+The default behavior of the Spark Cassandra Connector is to overwrite collections when inserted into
+a cassandra table. To override this behavior you can specify a custom mapper with instructions on
+how you would like the collection to be treated.
+
+The following operations are supported
+
+- append/add  (lists, sets, maps)
+- prepend (lists)
+- remove  (lists, sets)
+- overwrite (lists, sets, maps) :: Default
+
+Remove is not supported for Maps.
+
+These are applied by adding the desired behavior to the ColumnSelector
+
+Example Usage
+
+Takes the elements from rddSetField and removes them from corrosponding C* column
+"a_set" and takes elements from "rddMapField" and adds them to C* column "a_map" where C*
+column key == key in the RDD elements. 
+   
+    ("key", "a_set" as "rddSetField" remove , "a_map" as "rddMapField" append)
+
+
+Example Schema
+
+```sql
+CREATE TABLE ks.collections_mod (
+      key int PRIMARY KEY,
+      lcol list<text>,
+      mcol map<text, text>,
+      scol set<text>
+  )
+```
+
+Example Appending/Prepending Lists
+
+```scala
+val listElements = sc.parallelize(Seq(
+  (1,Vector("One")),
+  (1,Vector("Two")),
+  (1,Vector("Three"))))
+
+val prependElements = sc.parallelize(Seq(
+  (1,Vector("PrependOne")),
+  (1,Vector("PrependTwo")),
+  (1,Vector("PrependThree"))))
+
+listElements.saveToCassandra("ks", "collections_mod", SomeColumns("key", "lcol" append))
+prependElements.saveToCassandra("ks", "collections_mod", SomeColumns("key", "lcol" prepend))
+```
+
+```sql
+cqlsh> Select * from ks.collections_mod where key = 1
+   ... ;
+
+ key | lcol                                                                | mcol | scol
+-----+---------------------------------------------------------------------+------+------
+   1 | ['PrependThree', 'PrependTwo', 'PrependOne', 'One', 'Two', 'Three'] | null | null
+
+(1 rows)
+```
+
 ## Saving objects of Cassandra User Defined Types
 To save structures consisting of many fields, use `com.datastax.spark.connector.UDTValue`
 class. An instance of this class can be easily obtained from a Scala `Map` by calling `fromMap`
@@ -96,6 +180,76 @@ val address = UDTValue.fromMap(Map("city" -> "Santa Clara", "street" -> "Freedom
 val company = Company("DataStax", address)
 sc.parallelize(Seq(company)).saveToCassandra("test", "companies")
 ```
+
+## Specifying TTL and WRITETIME
+Spark Cassandra Connector saves the data without explicitly specifying TTL or WRITETIME. If a certain 
+values for them have to be used, there are a couple options provided by the API. 
+
+TTL and WRITETIME options are specified as properties of `WriteConf` object, which can be optionally 
+passed to `saveToCassandra` method. TTL and WRITETIME options are specified independently from one 
+another. 
+
+### Using a constant value for all rows
+When the same value should be used for all the rows, one can use the following syntax:
+
+```scala
+import com.datastax.spark.connector.writer._
+...
+rdd.saveToCassandra("test", "tab", writeConf = WriteConf(ttl = TTLOption.constant(100)))
+rdd.saveToCassandra("test", "tab", writeConf = WriteConf(timestamp = TimestampOption.constant(ts)))
+```
+
+`TTLOption.constant` accepts one of the following values:
+  - `Int` / the number of seconds
+  - `scala.concurrent.duration.Duration`
+  - `org.joda.time.Duration`
+
+`TimestampOption.constant` accepts one of the following values:
+  - `Long` / the number of microseconds
+  - `java.util.Date`
+  - `org.joda.time.DateTime`
+
+### Using a different value for each row
+When a different value of TTL or WRITETIME has to be used for each row, one can use the following syntax:
+
+```scala
+import com.datastax.spark.connector.writer._
+...
+rdd.saveToCassandra("test", "tab", writeConf = WriteConf(ttl = TTLOption.perRow("ttl")))
+rdd.saveToCassandra("test", "tab", writeConf = WriteConf(timestamp = TimestampOption.perRow("timestamp")))
+```
+
+`perRow(String)` method accepts a name of a property in each RDD item, which value will be used as TTL 
+or WRITETIME value for the row. 
+
+Say we have an RDD with `KeyValueWithTTL` objects, defined as follows:
+```scala
+case class KeyValueWithTTL(key: Int, group: Long, value: String, ttl: Int)
+
+val rdd = sc.makeRDD(Seq(
+  KeyValueWithTTL(1, 1L, "value1", 100), 
+  KeyValueWithTTL(2, 2L, "value2", 200), 
+  KeyValueWithTTL(3, 3L, "value3", 300)))
+```
+
+and a CQL table:
+```sql
+CREATE TABLE IF NOT EXISTS test.tab (
+    key INT, 
+    group BIGINT, 
+    value TEXT, 
+    PRIMARY KEY (key, group)
+)
+```
+
+When we run the following command:
+```scala
+import com.datastax.spark.connector.writer._
+...
+rdd.saveToCassandra("test", "tab", writeConf = WriteConf(ttl = TTLOption.perRow("ttl")))
+```
+
+the TTL for the 1st row will be 100, TTL for the 2nd row will be 200 and TTL for the 3rd row will be 300.
 
 ## Saving RDDs as new tables
 Use `saveAsCassandraTable` method to automatically create a new table with given name
@@ -124,6 +278,28 @@ val collection = sc.parallelize(Seq(WordCount("dog", 50), WordCount("cow", 60)))
 collection.saveAsCassandraTableEx(table2, SomeColumns("word", "count"))
 ```
 
+To create a table with a custom definition, and define which columns are to be partition and clustering column keys:
+
+```
+import com.datastax.spark.connector.cql.{ColumnDef, RegularColumn, TableDef, ClusteringColumn, PartitionKeyColumn}
+import com.datastax.spark.connector.types._
+
+// Define structure for rdd data
+case class outData(col1:UUID, col2:UUID, col3: Double, col4:Int)
+
+// Define columns
+val p1Col = new ColumnDef("col1",PartitionKeyColumn,UUIDType)
+val c1Col = new ColumnDef("col2",ClusteringColumn(0),UUIDType)
+val c2Col = new ColumnDef("col3",ClusteringColumn(1),DoubleType)
+val rCol = new ColumnDef("col4",RegularColumn,IntType)
+
+// Create table definition
+val table = TableDef("test","words",Seq(p1Col),Seq(c1Col, c2Col),Seq(rCol))
+
+// Map rdd into custom data structure and create table
+val rddOut = rdd.map(s => outData(s._1, s._2(0), s._2(1), s._3))
+rddOut.saveAsCassandraTableEx(table, SomeColumns("col1", "col2", "col3", "col4"))
+```
 
 ## Tuning
 The following properties set in `SparkConf` can be used to fine-tune the saving process, 

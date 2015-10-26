@@ -1,17 +1,15 @@
 package com.datastax.spark.connector.writer
 
-import scala.collection.immutable.Map
-
 import org.apache.cassandra.dht.IPartitioner
 
+import com.datastax.spark.connector.embedded.SparkTemplate._
 import com.datastax.spark.connector.cql.{CassandraConnector, Schema}
-import com.datastax.spark.connector.embedded.EmbeddedCassandra
 import com.datastax.spark.connector.{CassandraRow, SparkCassandraITFlatSpecBase}
 
 class RoutingKeyGeneratorSpec extends SparkCassandraITFlatSpecBase {
 
   useCassandraConfig(Seq("cassandra-default.yaml.template"))
-  val conn = CassandraConnector(Set(EmbeddedCassandra.getHost(0)))
+  val conn = CassandraConnector(defaultConf)
 
   val ks = "RoutingKeyGeneratorSpec"
 
@@ -21,12 +19,11 @@ class RoutingKeyGeneratorSpec extends SparkCassandraITFlatSpecBase {
     session.execute(s"""CREATE TABLE IF NOT EXISTS "$ks".two_keys (id INT, id2 TEXT, value TEXT, PRIMARY KEY ((id, id2)))""")
   }
 
-  implicit val protocolVersion = conn.withClusterDo(_.getConfiguration.getProtocolOptions.getProtocolVersionEnum)
   val cp = conn.withClusterDo(cluster => Class.forName(cluster.getMetadata.getPartitioner).newInstance().asInstanceOf[IPartitioner])
 
   "RoutingKeyGenerator" should "generate proper routing keys when there is one partition key column" in {
     val schema = Schema.fromCassandra(conn, Some(ks), Some("one_key"))
-    val rowWriter = RowWriterFactory.defaultRowWriterFactory[(Int, String)].rowWriter(schema.tables.head, Seq("id", "value"), Map.empty)
+    val rowWriter = RowWriterFactory.defaultRowWriterFactory[(Int, String)].rowWriter(schema.tables.head, IndexedSeq("id", "value"))
     val rkg = new RoutingKeyGenerator(schema.tables.head, Seq("id", "value"))
 
     conn.withSessionDo { session =>
@@ -47,7 +44,7 @@ class RoutingKeyGeneratorSpec extends SparkCassandraITFlatSpecBase {
 
   "RoutingKeyGenerator" should "generate proper routing keys when there are more partition key columns" in {
     val schema = Schema.fromCassandra(conn, Some(ks), Some("two_keys"))
-    val rowWriter = RowWriterFactory.defaultRowWriterFactory[(Int, String, String)].rowWriter(schema.tables.head, Seq("id", "id2", "value"), Map.empty)
+    val rowWriter = RowWriterFactory.defaultRowWriterFactory[(Int, String, String)].rowWriter(schema.tables.head, IndexedSeq("id", "id2", "value"))
     val rkg = new RoutingKeyGenerator(schema.tables.head, Seq("id", "id2", "value"))
 
     conn.withSessionDo { session =>

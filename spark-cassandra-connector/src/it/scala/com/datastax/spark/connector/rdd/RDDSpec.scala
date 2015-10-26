@@ -2,9 +2,8 @@ package com.datastax.spark.connector.rdd
 
 import com.datastax.spark.connector._
 import com.datastax.spark.connector.cql.CassandraConnector
-import com.datastax.spark.connector.embedded._
+import com.datastax.spark.connector.embedded.SparkTemplate._
 import com.datastax.spark.connector.rdd.partitioner.EndpointPartition
-
 
 case class KVRow(key: Int)
 
@@ -24,11 +23,11 @@ case class DataCol(pk1: Int, pk2: Int, pk3: Int, d1: Int)
 
 class RDDSpec extends SparkCassandraITFlatSpecBase {
 
+
   useCassandraConfig(Seq("cassandra-default.yaml.template"))
   useSparkConf(defaultSparkConf)
 
-  val conn = CassandraConnector(Set(EmbeddedCassandra.getHost(0)))
-  implicit val protocolVersion = conn.withClusterDo(_.getConfiguration.getProtocolOptions.getProtocolVersionEnum)
+  val conn = CassandraConnector(defaultConf)
   private val ks = "RDDSpec"
   val tableName = "key_value"
   val otherTable = "other_table"
@@ -184,22 +183,22 @@ class RDDSpec extends SparkCassandraITFlatSpecBase {
     checkArrayCassandraRow(result)
   }
 
-  it should "throw a meaningful exception if partition column is null when joining with Cassandra table" in {
+  it should "throw a meaningful exception if partition column is null when joining with Cassandra table" in withoutLogging{
     val source = sc.parallelize(keys).map(x ⇒ new KVWithOptionRow(None))
-
     val ex = the [Exception] thrownBy source.joinWithCassandraTable[(Int, Long, String)](ks, tableName).collect()
-    ex.getMessage should include("Invalid null value for partition key part key")
+    ex.getMessage.toLowerCase should include("invalid null value")
+    ex.getMessage.toLowerCase should include("key")
   }
 
-  it should "throw a meaningful exception if partition column is null when repartitioning by replica" in {
+  it should "throw a meaningful exception if partition column is null when repartitioning by replica" in withoutLogging{
     val source = sc.parallelize(keys).map(x ⇒ (None: Option[Int], x * 100: Long))
-    val ex = the [Exception] thrownBy source.repartitionByCassandraReplica(ks, tableName, 10).collect()
+    val ex = the[Exception] thrownBy source.repartitionByCassandraReplica(ks, tableName, 10).collect()
     ex.getMessage should include("Invalid null value for key column key")
   }
 
-  it should "throw a meaningful exception if partition column is null when saving" in {
+  it should "throw a meaningful exception if partition column is null when saving" in withoutLogging{
     val source = sc.parallelize(keys).map(x ⇒ (None: Option[Int], x * 100: Long, ""))
-    val ex = the [Exception] thrownBy source.saveToCassandra(ks, tableName)
+    val ex = the[Exception] thrownBy source.saveToCassandra(ks, tableName)
     ex.getMessage should include("Invalid null value for key column key")
   }
 
@@ -276,7 +275,6 @@ class RDDSpec extends SparkCassandraITFlatSpecBase {
     someCass should be (201)
 
   }
-
 
   "A CassandraRDD " should "be joinable with Cassandra" in {
     val source = sc.cassandraTable(ks, otherTable)

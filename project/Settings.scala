@@ -95,6 +95,7 @@ object Settings extends Build {
     /* Can not use -Xfatal-warnings until this known issue fixed:
       org.apache.cassandra.io.util.DataOutputPlus not found - continuing with a stub. */
     scalacOptions ++= encoding ++ Seq(
+      "-Xmax-classfile-name", "128",
       s"-target:jvm-${Versions.JDK}",
       "-deprecation",
       "-feature",

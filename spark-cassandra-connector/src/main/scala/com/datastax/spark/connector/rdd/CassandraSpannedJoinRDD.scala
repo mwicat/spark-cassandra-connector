@@ -88,28 +88,8 @@ class CassandraSpannedJoinRDD[K,L,R] private[connector](
       }
   }
 
-  override def cassandraCount(): Long = {
-    columnNames match {
-      case SomeColumns(_) =>
-        logWarning("You are about to count rows but an explicit projection has been specified.")
-      case _ =>
-    }
-
-    val counts =
-      new CassandraJoinRDD[K, Long](
-        left = left,
-        connector = connector,
-        keyspaceName = keyspaceName,
-        tableName = tableName,
-        columnNames = SomeColumns(RowCountRef),
-        joinColumns = joinColumns,
-        where = where,
-        limit = limit,
-        clusteringOrder = clusteringOrder,
-        readConf= readConf)
-
-    counts.map(_._2).reduce(_ + _)
-  }
+  override def cassandraCount(): Long =
+    throw new UnsupportedOperationException("Cannot call cassandraCount on an CassandraSpannedJoinRDD")
 
   /** This method will create the RowWriter required before the RDD is serialized.
     * This is called during getPartitions */
@@ -209,7 +189,7 @@ class CassandraSpannedJoinRDD[K,L,R] private[connector](
    * from the specified C* Keyspace and Table. This will be preformed on whatever data is
    * available in the previous RDD in the chain.
    */
-  override def compute(split: Partition, context: TaskContext): Iterator[(K, L, Iterable[R])] = {
+  override def compute(split: Partition, context: TaskContext): Iterator[(K, (L, Iterable[R]))] = {
     val session = connector.openSession()
     implicit val pv = protocolVersion(session)
     val stmt = session.prepare(singleKeyCqlQuery).setConsistencyLevel(consistencyLevel)
@@ -232,16 +212,16 @@ class CassandraSpannedJoinRDD[K,L,R] private[connector](
   private def fetchIterator(
     session: Session,
     bsb: BoundStatementBuilder[L],
-    lastIt: Iterator[(K, L)]): Iterator[(K, L, Iterable[R])] = {
+    lastIt: Iterator[(K, L)]): Iterator[(K, (L, Iterable[R]))] = {
 
     val columnNamesArray = selectedColumnRefs.map(_.selectedAs).toArray
     implicit val pv = protocolVersion(session)
 
-    for ((key, leftSide) <- lastIt) yield (key, leftSide, {
+    for ((key, leftSide) <- lastIt) yield (key, (leftSide, {
       val rs = session.execute(bsb.bind(leftSide))
       val iterator = new PrefetchingResultSetIterator(rs, fetchSize)
       iterator.map(rowReader.read(_, columnNamesArray)).toList
-    })
+    }))
   }
 
 
@@ -253,8 +233,8 @@ class CassandraSpannedJoinRDD[K,L,R] private[connector](
 
   override def getPreferredLocations(split: Partition): Seq[String] = left.preferredLocations(split)
 
-  override def toEmptyCassandraRDD: EmptyCassandraRDD[(L, Iterable[R])] =
-    new EmptyCassandraRDD[(L, Iterable[R])](
+  override def toEmptyCassandraRDD: EmptyCassandraRDD[(K, (L, Iterable[R]))] =
+    new EmptyCassandraRDD[(K, (L, Iterable[R]))](
       sc = left.sparkContext,
       keyspaceName = keyspaceName,
       tableName = tableName,

@@ -7,7 +7,7 @@ import com.datastax.spark.connector.cql._
 import com.datastax.spark.connector.mapper.ColumnMapper
 import com.datastax.spark.connector.rdd.partitioner.{CassandraPartitionedRDD, ReplicaPartitioner}
 import com.datastax.spark.connector.rdd.reader._
-import com.datastax.spark.connector.rdd.{CassandraJoinRDD, SpannedRDD, ValidRDDType}
+import com.datastax.spark.connector.rdd.{CassandraJoinRDD, CassandraSpannedJoinRDD, SpannedRDD, ValidRDDType}
 import com.datastax.spark.connector.writer.{ReplicaLocator, _}
 import org.apache.spark.SparkContext
 import org.apache.spark.SparkContext._
@@ -142,6 +142,21 @@ class RDDFunctions[T](rdd: RDD[T]) extends WritableToCassandra[T] with Serializa
     new CassandraJoinRDD[T, R](rdd, keyspaceName, tableName, connector, columnNames = selectedColumns, joinColumns = joinColumns)
   }
 
+  def joinWithSpannedCassandraTable[R](
+    keyspaceName: String,
+    tableName: String,
+    selectedColumns: ColumnSelector = AllColumns,
+    joinColumns: ColumnSelector = PartitionKeyColumns)(
+  implicit
+    connector: CassandraConnector = CassandraConnector(sparkContext.getConf),
+    newType: ClassTag[R],
+    rrf: RowReaderFactory[R],
+    ev: ValidRDDType[R],
+    currentType: ClassTag[T],
+    rwf: RowWriterFactory[T]): CassandraSpannedJoinRDD[T, R] = {
+
+    new CassandraSpannedJoinRDD[T, R](rdd, keyspaceName, tableName, connector, columnNames = selectedColumns, joinColumns = joinColumns)
+  }
 
   /**
    * Repartitions the data (via a shuffle) based upon the replication of the given `keyspaceName` and `tableName`.

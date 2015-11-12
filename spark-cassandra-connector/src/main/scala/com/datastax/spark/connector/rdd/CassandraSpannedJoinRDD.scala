@@ -35,11 +35,11 @@ class CassandraSpannedJoinRDD[K,L,R] private[connector](
     val clusteringOrder: Option[ClusteringOrder] = None,
     val readConf: ReadConf = ReadConf(),
     manualRowReader: Option[RowReader[R]] = None,
-    manualRowWriter: Option[RowWriter[L]] = None)(
+    manualRowWriter: Option[RowWriter[K]] = None)(
   implicit
     val leftClassTag: ClassTag[L],
     val rightClassTag: ClassTag[R],
-    @transient val rowWriterFactory: RowWriterFactory[L],
+    @transient val rowWriterFactory: RowWriterFactory[K],
     @transient val rowReaderFactory: RowReaderFactory[R])
   extends CassandraRDD[(K, (L, Iterable[R]))](left.sparkContext, left.dependencies)
   with CassandraTableRowReaderProvider[R] {
@@ -131,7 +131,7 @@ class CassandraSpannedJoinRDD[K,L,R] private[connector](
 
   lazy val rowWriter = manualRowWriter match {
     case Some(rowWriter) => rowWriter
-    case None => implicitly[RowWriterFactory[L]].rowWriter (tableDef, joinColumnNames.toIndexedSeq)
+    case None => implicitly[RowWriterFactory[K]].rowWriter (tableDef, joinColumnNames.toIndexedSeq)
   }
 
   def on(joinColumns: ColumnSelector): CassandraSpannedJoinRDD[K,L,R] = {
@@ -189,11 +189,11 @@ class CassandraSpannedJoinRDD[K,L,R] private[connector](
    * from the specified C* Keyspace and Table. This will be preformed on whatever data is
    * available in the previous RDD in the chain.
    */
-  override def compute(split: Partition, context: TaskContext): Iterator[(K, (L, Iterable[R]))] = {
+  override def compute(split: Partition, context: TaskContext): Iterator[(K, (L, Seq[R]))] = {
     val session = connector.openSession()
     implicit val pv = protocolVersion(session)
     val stmt = session.prepare(singleKeyCqlQuery).setConsistencyLevel(consistencyLevel)
-    val bsb = new BoundStatementBuilder[L](rowWriter, stmt, pv, where.values)
+    val bsb = new BoundStatementBuilder[K](rowWriter, stmt, pv, where.values)
     val metricsUpdater = InputMetricsUpdater(context, readConf)
     val rowIterator = fetchIterator(session, bsb, left.iterator(split, context))
     val countingIterator = new CountingIterator(rowIterator, limit)
@@ -211,14 +211,14 @@ class CassandraSpannedJoinRDD[K,L,R] private[connector](
 
   private def fetchIterator(
     session: Session,
-    bsb: BoundStatementBuilder[L],
-    lastIt: Iterator[(K, L)]): Iterator[(K, (L, Iterable[R]))] = {
+    bsb: BoundStatementBuilder[K],
+    lastIt: Iterator[(K, L)]): Iterator[(K, (L, Seq[R]))] = {
 
     val columnNamesArray = selectedColumnRefs.map(_.selectedAs).toArray
     implicit val pv = protocolVersion(session)
 
     for ((key, leftSide) <- lastIt) yield (key, (leftSide, {
-      val rs = session.execute(bsb.bind(leftSide))
+      val rs = session.execute(bsb.bind(key))
       val iterator = new PrefetchingResultSetIterator(rs, fetchSize)
       iterator.map(rowReader.read(_, columnNamesArray)).toList
     }))

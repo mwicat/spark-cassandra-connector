@@ -40,7 +40,7 @@ class PairRDDFunctions[K, V](rdd: RDD[(K, V)]) extends Serializable {
     keyType: ClassTag[K],
     valueType: ClassTag[V],
     currentType: ClassTag[(K,V)],
-    rwf: RowWriterFactory[V]): CassandraSpannedJoinRDD[K,V,R] = {
+    rwf: RowWriterFactory[K]): CassandraSpannedJoinRDD[K,V,R] = {
 
     new CassandraSpannedJoinRDD[K,V,R](rdd, keyspaceName, tableName, connector, columnNames = selectedColumns, joinColumns = joinColumns)
   }

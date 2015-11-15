@@ -37,7 +37,6 @@ class CassandraSpannedJoinRDD[K,L,R] private[connector](
     manualRowReader: Option[RowReader[R]] = None,
     manualRowWriter: Option[RowWriter[K]] = None)(
   implicit
-    val leftClassTag: ClassTag[L],
     val rightClassTag: ClassTag[R],
     @transient val rowWriterFactory: RowWriterFactory[K],
     @transient val rowReaderFactory: RowReaderFactory[R])

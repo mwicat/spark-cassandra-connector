@@ -58,11 +58,11 @@ package object connector {
   implicit def toRDDFunctions[T](rdd: RDD[T]): RDDFunctions[T] =
     new RDDFunctions(rdd)
 
-  implicit def toPairRDDFunctions[K, V](rdd: RDD[(K, V)]): PairRDDFunctions[K, V] =
-    new PairRDDFunctions(rdd)
-
   implicit def toRowPairRDDFunctions[K, V](rdd: RDD[(K, Iterable[CassandraRow])]): RowPairRDDFunctions[K, V] =
     new RowPairRDDFunctions(rdd)
+
+  implicit def toPairRDDFunctions[K, V](rdd: RDD[(K, V)]): PairRDDFunctions[K, V] =
+    new PairRDDFunctions(rdd)
 
   implicit class ColumnNameFunctions(val columnName: String) extends AnyVal {
     def writeTime: WriteTime = WriteTime(columnName)
